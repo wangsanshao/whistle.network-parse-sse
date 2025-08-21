@@ -1,0 +1,243 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OpenAI SSE格式解析器</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+    <div class="header">
+        <h1>OpenAI SSE格式解析器</h1>
+        <p>将OpenAI格式的SSE输出粘贴到左侧，右侧将显示格式化后的消息内容和工具调用</p>
+    </div>
+
+    <div class="container">
+        <div class="left-panel">
+            <div class="panel-header">SSE输入 (原始数据)</div>
+            <div class="panel-content">
+                <textarea id="sseInput" placeholder="请粘贴OpenAI格式的SSE输出内容..."></textarea>
+            </div>
+            <button class="parse-btn" onclick="parseSSE()">解析</button>
+        </div>
+
+        <div class="right-panel">
+            <div class="panel-header">解析结果</div>
+            <div class="panel-content" id="output">
+                <div class="empty-state">
+                    <h3>等待解析</h3>
+                    <p>请在左侧粘贴SSE内容并点击"解析"按钮</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function parseSSE() {
+            const input = document.getElementById('sseInput').value.trim();
+            const output = document.getElementById('output');
+            
+            if (!input) {
+                output.innerHTML = '<div class="empty-state"><h3>输入为空</h3><p>请粘贴SSE内容</p></div>';
+                return;
+            }
+
+            try {
+                const messages = [];
+                const toolCalls = [];
+                
+                // 按行分割输入
+                const lines = input.split('\n');
+                
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    
+                    // 跳过空行和非data行
+                    if (!line || !line.startsWith('data: ')) {
+                        continue;
+                    }
+                    
+                    // 提取JSON数据
+                    const jsonStr = line.substring(6); // 移除 "data: " 前缀
+                    
+                    // 跳过 [DONE] 标记
+                    if (jsonStr === '[DONE]') {
+                        continue;
+                    }
+                    
+                    try {
+                        const data = JSON.parse(jsonStr);
+                        
+                        if (data.choices && data.choices[0]) {
+                            const choice = data.choices[0];
+                            const delta = choice.delta;
+                            
+                            if (delta) {
+                                // 处理消息内容
+                                if (delta.content) {
+                                    let lastMessage = messages[messages.length - 1];
+                                    if (!lastMessage || lastMessage.role !== (delta.role || 'assistant')) {
+                                        messages.push({
+                                            role: delta.role || 'assistant',
+                                            content: delta.content
+                                        });
+                                    } else {
+                                        lastMessage.content += delta.content;
+                                    }
+                                }
+                                
+                                // 处理工具调用
+                                if (delta.tool_calls) {
+                                    delta.tool_calls.forEach(toolCall => {
+                                        let existingCall = toolCalls.find(tc => tc.id === toolCall.id);
+                                        if(!toolCall.id){
+                                            existingCall = toolCalls[toolCalls.length-1];
+                                        }
+                                        if (!existingCall) {
+                                            toolCalls.push({
+                                                id: toolCall.id,
+                                                type: toolCall.type || 'function',
+                                                function: {
+                                                    name: toolCall.function?.name || '',
+                                                    arguments: toolCall.function?.arguments || ''
+                                                }
+                                            });
+                                        } else {
+                                            if (toolCall.function?.name) {
+                                                existingCall.function.name += toolCall.function.name;
+                                            }
+                                            if (toolCall.function?.arguments) {
+                                                existingCall.function.arguments += toolCall.function.arguments;
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    } catch (parseError) {
+                        console.warn('解析JSON失败:', parseError, '原始数据:', jsonStr);
+                    }
+                }
+                
+                // 生成输出HTML
+                let html = '';
+                
+                // 显示消息
+                if (messages.length > 0) {
+                    html += '<div class="output-section">';
+                    html += '<div class="section-header">📝 消息内容</div>';
+                    html += '<div class="section-content">';
+                    
+                    messages.forEach((message, index) => {
+                        html += '<div class="message-item">';
+                        html += `<div class="message-role">${message.role}:</div>`;
+                        html += `<div class="message-content">${escapeHtml(message.content)}</div>`;
+                        html += '</div>';
+                    });
+                    
+                    html += '</div></div>';
+                }
+                
+                // 显示工具调用
+                if (toolCalls.length > 0) {
+                    html += '<div class="output-section">';
+                    html += '<div class="section-header">🔧 工具调用</div>';
+                    html += '<div class="section-content">';
+                    
+                    toolCalls.forEach((toolCall, index) => {
+                        html += '<div class="tool-call">';
+                        
+                        // 工具头部信息
+                        html += '<div class="tool-header">';
+                        html += `<span class="tool-name">🔧 ${escapeHtml(toolCall.function.name)}</span>`;
+                        if (toolCall.id) {
+                            html += `<span class="tool-id">(ID: ${escapeHtml(toolCall.id)})</span>`;
+                        }
+                        html += '</div>';
+                        
+                        // 参数部分
+                        if (toolCall.function.arguments) {
+                            html += '<div class="tool-args-label">参数:</div>';
+                            try {
+                                const args = JSON.parse(toolCall.function.arguments);
+                                html += '<div class="tool-args">';
+                                html += escapeHtml(JSON.stringify(args, null, 4));
+                                html += '</div>';
+                            } catch (e) {
+                                // 如果不是有效的JSON，直接显示原始内容
+                                html += '<div class="tool-args">';
+                                html += escapeHtml(toolCall.function.arguments);
+                                html += '</div>';
+                            }
+                        }
+                        
+                        html += '</div>';
+                    });
+                    
+                    html += '</div></div>';
+                }
+                
+                if (messages.length === 0 && toolCalls.length === 0) {
+                    html = '<div class="empty-state"><h3>未找到内容</h3><p>输入的SSE数据中没有找到消息或工具调用</p></div>';
+                }
+                
+                output.innerHTML = html;
+                
+            } catch (error) {
+                output.innerHTML = `<div class="empty-state"><h3>解析错误</h3><p>错误详情: ${escapeHtml(error.message)}</p></div>`;
+                console.error('解析SSE时出错:', error);
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 监听输入变化，自动解析
+        document.getElementById('sseInput').addEventListener('input', function() {
+            const input = this.value.trim();
+            if (input && input.includes('data: ')) {
+                // 延迟解析，避免频繁触发
+                clearTimeout(this.parseTimeout);
+                this.parseTimeout = setTimeout(parseSSE, 500);
+            }
+        });
+    </script>
+    <script>
+        (function () {
+         var wb = window.whistleBridge;
+         var $out = document.getElementById('sseInput');
+     
+         function put(text) { $out.value = text == null ? '' : String(text); }
+     
+         async function renderSelected() {
+             var { res } = await wb.getSelectedSession() || {};
+             if (!res) return put('未获取到选中请求，请在 Network 里点选一条记录');
+             // 判断一下请求头是否是 sse 类型的，如果匹配到 content-type 的话
+             const headers = res.headers;
+             const contentType = headers['content-type'];
+             if (contentType && contentType.includes('text/event-stream')) {
+                const body = wb.decodeBase64(res.base64);
+                const text = body.text;
+                put(text);
+             }else{
+                put('非 SSE 响应');
+             }
+         }
+     
+         if (!wb) return put('whistleBridge 不可用（请在 Whistle 的 Network 详情面板内打开）');
+     
+         // 首次渲染
+         renderSelected();
+     
+         // 响应到达/完成或选中变化时刷新
+         wb.addSessionResponseListener && wb.addSessionResponseListener(function (e) { renderSelected(); });
+         wb.addSessionCompleteListener && wb.addSessionCompleteListener(function (e) { renderSelected(); });
+         wb.addSessionActiveListener && wb.addSessionActiveListener(function (e) { renderSelected(); });
+         })();
+       </script>
+</body>
+</html>
+
+

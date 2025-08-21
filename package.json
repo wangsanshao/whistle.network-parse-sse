@@ -1,0 +1,25 @@
+{
+  "name": "whistle.network-parse-sse",
+  "version": "0.0.1",
+  "private": false,
+  "description": "A minimal Whistle plugin that adds a custom tab to Network detail panel.",
+  "main": "index.js",
+  "license": "MIT",
+  "keywords": [
+    "whistle",
+    "plugin",
+    "network",
+    "tab"
+  ],
+  "whistleConfig": {
+    "noOption": false,
+    "inspectorsTab": {
+      "res": {
+        "name": "parse-sse",
+        "action": "/public/res-tab.html"
+      }
+    }
+  }
+}
+
+
