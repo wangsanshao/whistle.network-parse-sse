@@ -48,17 +48,28 @@ module.exports.uiServer = (server /* http.Server | Express app */, options) => {
     try {
       // In uiServer, req.url is already relative to plugin root
       let rel = req.url || "/";
+      
+      // 只有当请求根路径时才返回HTML文件
       if (rel === "/" || rel === "") {
-        rel = "/public/res-tab.html";
+        const indexPath = path.join(staticRoot, "public/res-tab.html");
+        if (fs.existsSync(indexPath)) {
+          return serveFile(res, indexPath);
+        }
       }
-      const filePath = path.join(staticRoot, rel.replace(/^\//, ""));
+      
+      // 首先尝试从public目录加载文件
+      let filePath = path.join(staticRoot, "public", rel.replace(/^\//, ""));
       if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
         return serveFile(res, filePath);
       }
-      const indexPath = path.join(staticRoot, "public/res-tab.html");
-      if (fs.existsSync(indexPath)) {
-        return serveFile(res, indexPath);
+      
+      // 如果public目录中没有找到，尝试从根目录加载
+      filePath = path.join(staticRoot, rel.replace(/^\//, ""));
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        return serveFile(res, filePath);
       }
+      
+      // 文件不存在时返回404，而不是回退到HTML
       if (typeof next === "function") return next();
       res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
       res.end("Not Found");
